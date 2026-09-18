@@ -1,14 +1,14 @@
 # 与 dsh.bundle.patch 配套；装进 profile 即自动启用。
 #
 # 改配置请用 id 定向覆盖（不要再用 - insert:，本 bundle 已自动 insert 自身 id，
-# 重复 insert 会 boot 失败 duplicate loader entry id: browser-use）：
+# 重复 insert 会 boot 失败 duplicate loader entry id: browser-harness）：
 #
-# - id: browser-use
+# - id: browser-harness
 #   config:
 #     mode: dedicated          # dedicated（默认，独立专用 Chrome）| system（附着系统 Chrome）
 #     command: browser-use     # 或 browser-harness（更轻，依赖少）
 #     buName: dsh-browser
 #     timeoutMs: 120000
 - insert:
-    - id: browser-use
-      name: 'dsh-browser-use'
+    - id: browser-harness
+      name: 'dsh-browser-harness'

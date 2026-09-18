@@ -1,4 +1,4 @@
-# dsh-browser-use
+# dsh-browser-harness
 
 DSH（DeepSeek Harness）插件：把 [browser-use](https://github.com/browser-use/browser-use) 的 **Browser Harness** 注册为会话工具，让 DSH 的 agent 直接写 Python 驱动一个真实 Chrome —— 导航、点击、填表、取无障碍树、执行 JS/CDP、截图。
 
@@ -27,20 +27,20 @@ browser-use telemetry disable
 ### 2. 装插件
 
 ```bash
-dsh plugin --profile web add dsh-browser-use
+dsh plugin --profile web add dsh-browser-harness
 ```
 
 或从本地路径：
 
 ```bash
-dsh plugin --profile web add file:/path/to/dsh-browser-use
+dsh plugin --profile web add file:/path/to/dsh-browser-harness
 ```
 
 装完 `dsh --profile web --dump-config` 里应出现：
 
 ```yaml
-- id: browser-use
-  name: dsh-browser-use
+- id: browser-harness
+  name: dsh-browser-harness
 ```
 
 ## 工具
@@ -57,7 +57,7 @@ dsh plugin --profile web add file:/path/to/dsh-browser-use
 在 profile 的 `cordis.patch.yml` 里用 **id 定向覆盖**（不要 `- insert:`，本 bundle 已自动 insert 自身 id）：
 
 ```yaml
-- id: browser-use
+- id: browser-harness
   config:
     mode: dedicated            # dedicated（默认）| system
     command: browser-use       # 或 browser-harness，或绝对路径
