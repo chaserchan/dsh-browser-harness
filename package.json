@@ -1,0 +1,49 @@
+{
+  "name": "dsh-browser-use",
+  "version": "0.1.0",
+  "description": "浏览器控制插件：把 browser-use / browser-harness 的 Browser Harness 注册为 DSH 会话工具，让 agent 直接写 Python 驱动真实 Chrome（导航/点击/输入/取无障碍树/截图），支持独立专用浏览器与附着系统浏览器两种模式。",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/*.js",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dshx": {
+    "contributes": {
+      "tools": [
+        "browser_run",
+        "browser_status"
+      ],
+      "skills": []
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": ">=0.1.0-rc.6 <0.2.0"
+  },
+  "engines": {
+    "node": ">=22.13",
+    "dsh": ">=0.1.0-rc.6 <0.2.0"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh-plugin",
+    "browser",
+    "browser-use",
+    "browser-harness",
+    "automation",
+    "cdp"
+  ],
+  "license": "MIT"
+}
