@@ -4,9 +4,31 @@ DSH（DeepSeek Harness）插件：把 [browser-use](https://github.com/browser-u
 
 **不套娃**：Browser Harness 不是「另一个 LLM agent」，而是一个给 coding agent 用的浏览器控制面。DSH 自己的 agent 就是大脑，写的每一行 Python 都留在会话历史里，可读、可审计、可复现。**不需要额外的 LLM，也不需要 API key。**
 
-## 它解决什么
+## 人机协同（0.2.0 新增）
 
-DSH 的 agent 原本只能读写文件和跑命令，碰到需要「打开网页看一眼」「登录后台点几下」「把表格抓下来」这类任务就断了。本插件补上这一段。
+典型场景：申请开发者账号、注册平台、填复杂表单 —— **agent 逐步陪跑，能填的它填，需要本人的交还给你**。
+
+```
+agent：打开页面 → show_tab() 让你看到 → form_fields() 摸清表单
+      → 姓名/邮箱/项目名等普通字段自动填
+agent：遇到登录/验证码/扫码/支付 → show_tab() + 明确告诉你「这步你来」
+你：  在浏览器里完成登录/验证
+agent：wait_url_change() 检测到跳转 → 继续推进 → page_brief() 汇报结果
+```
+
+0.2.0 起内置 helper（每个 `browser_run` 自动注入，零 import 直调）：
+
+```python
+ax_list()            # 可交互元素清单 [{role,name,cx,cy}] —— 找元素不再手搓 CDP
+ax_click(role=None, text=None)   # 按角色/文本定位并点击
+form_fields()        # 表单字段清单
+fill_field(字段名, 值)            # 自动填单个控件（兼容 React/Vue）
+show_tab()           # 页面切到前台，交还用户
+wait_url_change(旧url)           # 等用户操作完成后的跳转
+page_brief()         # 一屏页面概况 {url,title,elements,text}
+```
+
+**要求**：人机协同需要你**看得到**那个 Chrome —— 用默认的 `dedicated` 模式（有头专用浏览器）即可；agent 与你在同一标签页上交替操作。
 
 ## 安装
 
