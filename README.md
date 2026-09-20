@@ -30,6 +30,31 @@ page_brief()         # 一屏页面概况 {url,title,elements,text}
 
 **要求**：人机协同需要你**看得到**那个 Chrome —— 用默认的 `dedicated` 模式（有头专用浏览器）即可；agent 与你在同一标签页上交替操作。
 
+## 多会话并发（lane 车道隔离）
+
+多个 dsh 会话同时用浏览器会**抢同一个标签页**（harness 的并发模型：一个 daemon 只有一个「当前 tab」）。0.3.0 起 `browser_run` 支持 **lane 车道参数**：
+
+```
+browser_run({ code, lane: "apple" })   ← 任务 A 独占 apple 车道
+browser_run({ code, lane: "router" })  ← 任务 B 独占 router 车道，与 A 真并行
+```
+
+**底层**：每个 lane = 一个独立的具名 daemon（`BU_NAME=<buPrefix>-<lane>`）+ 一块**持久专属标签页**。不同 daemon 可同时附着同一个 Chrome（官方支持的并发形态），共用 profile/登录态，但各自只有自己的 tab、互不抢占。**同一 lane 内的调用自动串行**（正确性要求），跨 lane 真并行。
+
+**怎么操作**：
+- 单任务：不传 `lane`（自动按会话隔离，无感知）
+- 多任务并行：给每个并行任务固定一个 lane 名（如任务代号）；同一任务**始终带同一个 lane**，它的页面状态就一直在
+- 要回到某个任务的页面：带它的 lane 再调一次即可
+
+**怎么调试**：
+- `browser_status({})` → `lanes.active` 列出本进程活跃车道（lane 名 / 调用次数 / 空闲时长 / 对应 daemon 名）
+- 某个 lane 的 daemon 日志：`~/.config/browser-harness/tmp/bu.log`
+- 看某车道当前开了哪些 tab：`browser_run({ code: 'print(list_tabs())', lane: 'apple' })`
+- tab 堆积清理：`close_tab()` 关当前，或 `list_tabs()` 后按 targetId 精确关
+- 彻底重置某车道：删 daemon（`browser-use --reload` 会停全部）后该 lane 下次调用自动重建
+
+**版本注意**：0.2.x 无 lane 参数；升级到 0.3.0 后旧的默认 daemon（`dsh-browser`）仍会被 `restoreTab: false` 或 `buName` 覆盖场景使用，其余走 `<buPrefix>-<lane>`。
+
 ## 安装
 
 ### 1. 装 Harness CLI（前置）
