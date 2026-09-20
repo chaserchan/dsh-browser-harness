@@ -95,9 +95,44 @@ dsh plugin --profile web add file:/path/to/dsh-browser-harness
 | 工具 | 作用 |
 |---|---|
 | `browser_run({ code, timeoutMs? })` | 把一段 **Python** 交给 Harness 执行。`print()` 的输出就是返回值；返回 `{ok, exitCode, stdout, stderr, hint}`。`ok=false` 时先读 `hint` —— 它已经把错误码翻译成下一步动作。 |
-| `browser_status({})` | 体检：回显解析到的命令与其来源、模式、`BU_NAME`/CDP 地址、doctor 诊断。`browser_run` 报错时先调它。 |
+| `browser_status({})` | 体检：回显解析到的命令与其来源、模式、`BU_NAME`/CDP 地址、doctor 诊断、autopilot 状态。`browser_run` 报错时先调它。 |
+| `browser_autopilot({ url, goal, lane? })` | 目标式自动化（**需配置 TypeSafe key，未配置时不可用**）。见下节。 |
 
 插件还会把完整的**函数速查表 + 操作纪律**注入系统提示词，所以 agent 知道有哪些函数可用、哪些不存在。
+
+## Autopilot：TypeSafe key 条件启用（0.4.0 新增）
+
+[Jev](https://github.com/browser-use/jev-ultrafast) 是 TypeSafe 开源的 **System One** 浏览器模型（非 LLM，读页面 DOM 做毫秒级结构化决策），与 Browser Harness 同根同源。配置了 TypeSafe key 后，插件多一个**目标式**工具：
+
+```
+browser_autopilot({ url: "https://...", goal: "完成开发者账号注册并进入控制台" })
+```
+
+**条件启用语义（严格）**：
+
+| 状态 | 行为 |
+|---|---|
+| 没配置 key | 工具执行直接拒绝并提示去哪里配；系统提示词**不注入** autopilot 段 —— 模型连这个工具的存在都看不到 |
+| 配置了 key | 立即可用（settings 热加载，保存即生效，无需重启）；系统提示词追加 autopilot 用法段 |
+
+**配置入口**：DSH 设置页 → 通用设置 → **浏览器自动化**（本插件注册的配置区）：
+
+- **TypeSafe API Key** —— 配置后启用 autopilot
+- **Text Model API Key** —— 可选，Jev 兜底文本模型的 OpenAI 兼容 key（如 DeepSeek）
+
+key 也可以用环境变量给：`TYPESAFE_API_KEY` / `TEXT_MODEL_API_KEY`（设置面板优先）。
+
+**jev 运行体**：key 只是「许可」，执行还需要本机装有 jev-ultrafast。插件不猜命令，用配置项指定：
+
+```yaml
+- id: browser-harness
+  config:
+    autopilotCommand: 'uvx jev-ultrafast'   # 按空格切分，自动追加 --url/--goal
+```
+
+未配置 `autopilotCommand` 时，autopilot 会返回明确的安装/配置指引，而不是报一条莫名的 spawn 错误。执行时插件会把 `TYPESAFE_API_KEY`、`TEXT_MODEL_API_KEY`、`BU_NAME`（lane 对应 daemon）与 `BU_CDP_URL` 透传给子进程 —— Jev 与 `browser_run` 附着同一个浏览器、同一条 lane 车道。
+
+优先级：`config.autopilotCommand` > 环境变量（无）> 未配置（拒绝执行 + 指引）。
 
 ## 配置
 
@@ -125,6 +160,7 @@ dsh plugin --profile web add file:/path/to/dsh-browser-harness
 | `chromeArgs` | `[]` | 追加给 Chrome 的参数（代理、窗口大小等） |
 | `timeoutMs` | `120000` | 单次执行预算，上限 600000 |
 | `restoreTab` | `true` | 是否设置 `BU_NAME` 让 daemon 用独立后台 tab |
+| `autopilotCommand` | 空 | jev 运行体命令（autopilot 执行体），见「Autopilot」节 |
 
 同一份配置也可用环境变量给：`DSH_BROWSER_USE_MODE` / `DSH_BROWSER_USE_BIN` / `DSH_BROWSER_USE_PORT` / `DSH_BROWSER_USE_PROFILE`。
 

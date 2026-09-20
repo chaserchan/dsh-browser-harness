@@ -9,6 +9,11 @@
 
 const tools = []
 const sections = []
+const settingsNamespaces = []
+
+/** settings mock：可切换返回值，用来测「有 key / 没 key」两条路径。 */
+let settingsValue = {}
+const settingsScope = { get: () => settingsValue }
 
 const svc = {
   tools: {
@@ -21,6 +26,12 @@ const svc = {
     section(section) {
       sections.push(section)
       return () => {}
+    },
+  },
+  settings: {
+    register(namespace, schema) {
+      settingsNamespaces.push({ namespace, schema })
+      return settingsScope
     },
   },
 }
@@ -61,12 +72,12 @@ for (const fn of ['new_tab', 'page_info', 'click_at_xy', 'fill_input', 'press_ke
 }
 check('速查表明确标注 evaluate 不存在', /evaluate/.test(HARNESS_API) && /js\(/.test(HARNESS_API))
 
-// 3) apply
-mod.apply(mockCtx, {})
+// 3) apply（system 模式：离线冒烟绝不拉起专用 Chrome）
+mod.apply(mockCtx, { mode: 'system' })
 
-check('注册了 2 个工具', tools.length === 2, `实际 ${tools.length}`)
+check('注册了 3 个工具', tools.length === 3, `实际 ${tools.length}`)
 const names = tools.map((t) => t.name).sort()
-check('工具名符合预期', names.join(',') === 'browser_run,browser_status', names.join(','))
+check('工具名符合预期', names.join(',') === 'browser_autopilot,browser_run,browser_status', names.join(','))
 
 for (const t of tools) {
   check(`${t.name} 有 description`, typeof t.description === 'string' && t.description.length > 20)
@@ -81,13 +92,101 @@ check('browser_run.code 是必填 string', run.parameters?.properties?.code?.typ
 check('browser_run.timeoutMs 是可选 integer', run.parameters?.properties?.timeoutMs?.type === 'integer' && !(run.parameters.required ?? []).includes('timeoutMs'))
 check('browser_status 无必填参数', (tools.find((t) => t.name === 'browser_status').parameters?.required ?? []).length === 0)
 
-// 4) systemPrompt 注入
+// 3.5) settings 注册与条件启用
+check('注册了 settings namespace browser-harness', settingsNamespaces.map((n) => n.namespace).join(',') === 'browser-harness')
+const autopilot = tools.find((t) => t.name === 'browser_autopilot')
+check('autopilot.url/goal 必填', (autopilot.parameters?.required ?? []).join(',') === 'url,goal' || (autopilot.parameters?.required ?? []).join(',') === 'goal,url', (autopilot.parameters?.required ?? []).join(','))
+
+// 没 key：执行被拒绝并引导到设置页
+const noKeyRes = await autopilot.execute({ url: 'https://example.com', goal: 'test' }, {})
+check('无 key 时 autopilot 拒绝执行', noKeyRes.ok === false && typeof noKeyRes.hint === 'string')
+check('无 key 时的提示指向设置页', /设置/.test(noKeyRes.hint ?? ''))
+
+// 4) systemPrompt 注入（text 是函数、按 key 动态求值）
 check('注册了 1 个 prompt section', sections.length === 1, `实际 ${sections.length}`)
 const sec = sections[0] ?? {}
 check('section 名带命名空间前缀', typeof sec.name === 'string' && sec.name.includes(':'))
 check('section.order 是有限数', Number.isFinite(sec.order))
-const text = typeof sec.text === 'function' ? sec.text() : sec.text
-check('section.text 能求值出速查表', typeof text === 'string' && text.includes('new_tab('))
+check('section.text 是函数（每步重估，支持热生效）', typeof sec.text === 'function')
+// 此刻仍是无 key 状态，先求值再切 key
+const textNoKey = sec.text()
+check('无 key 时提示词不含 autopilot 段', !textNoKey.includes('browser_autopilot'))
+
+// 有 key（settings mock 返回）：不再走「未配置」拒绝路径
+settingsValue = { typesafeKey: 'ts_test_123' }
+const hasKeyRes = await autopilot.execute({ url: 'https://example.com', goal: 'test' }, {})
+check('有 key 时不再报「未配置 key」', !(hasKeyRes.hint ?? '').includes('未配置 TypeSafe key'), hasKeyRes.hint)
+check('有 key 时 autopilot 命令未配置有明确指引', typeof hasKeyRes.hint === 'string' || hasKeyRes.ok === false, JSON.stringify(hasKeyRes).slice(0, 120))
+
+const textWithKey = sec.text()
+check('有 key 时提示词含 autopilot 段', textWithKey.includes('browser_autopilot') && textWithKey.includes('new_tab('))
+
+// 5) client 半边（window.__ModuleLoader__ 模式：mock 浏览器环境后动态 import）
+{
+  let clientDef = null
+  const localeDictionaries = []
+  const slotInjections = []
+  const slotRegistrations = []
+  let scopeBound = null
+  let scopeSnapshot = { status: 'ready', value: { typesafeKey: '', textModelKey: '' } }
+
+  globalThis.window = {
+    __ModuleLoader__: {
+      load(def) { clientDef = def },
+    },
+  }
+  // window 必须先于 import 就位（client.js 顶层就调 __ModuleLoader__.load）
+  await import('../lib/client.js')
+  const fakeRequire = (name) => {
+    if (name === 'react/jsx-runtime') return { jsx: () => null, jsxs: () => null }
+    if (name === 'react') return { useState: (v) => [v, () => {}], useEffect: () => {}, useRef: (v) => ({ current: v }) }
+    if (name === '@deepseek-ai/dsh-client-store') {
+      return { defineStore: (spec) => spec }
+    }
+    throw new Error(`smoke: client require 白名单外的包 "${name}"`)
+  }
+  // factory 的返回值就是模块（module.exports），与 global-prompt 同构
+  const clientModule = clientDef.factory(fakeRequire)
+
+  check('client: __ModuleLoader__.load 注册了 id', clientDef.id === 'dsh-plugin-browser-harness', String(clientDef.id))
+  check('client: exports.inject 三服务', clientModule.inject.join(',') === 'slots,locale,settingsScope', clientModule.inject.join(','))
+
+  const clientCtx = {
+    effect: (fn) => fn(),
+    locale: {
+      register: (ns, dict) => localeDictionaries.push({ ns, dict }),
+      bind: () => (key) => key,
+    },
+    settingsScope: {
+      bind: (opts) => {
+        scopeBound = opts
+        return {
+          subscribe: () => () => {},
+          getSnapshot: () => scopeSnapshot,
+          set: () => Promise.resolve(),
+        }
+      },
+    },
+    slots: {
+      inject: (name, fn) => { slotInjections.push(name); fn() },
+      register: (spec, comp) => slotRegistrations.push({ spec, comp }),
+    },
+  }
+  clientModule.apply(clientCtx)
+
+  check('client: 绑定 settings namespace browser-harness', scopeBound?.namespace === 'browser-harness', JSON.stringify(scopeBound))
+  check('client: 注入 settings.general.item 槽位', slotInjections.join(',') === 'settings.general.item', slotInjections.join(','))
+  const reg = slotRegistrations[0]?.spec ?? {}
+  check('client: 槽位 id 为 browser-harness', reg.id === 'browser-harness', String(reg.id))
+  check('client: 中英词典 key 集一致', (() => {
+    const d = localeDictionaries[0]?.dict
+    if (!d) return false
+    const zh = Object.keys(d.zh).sort().join(',')
+    const en = Object.keys(d.en).sort().join(',')
+    return zh === en && zh.length > 0
+  })())
+  check('client: 词典含 TypeSafe 字段文案', Object.values(localeDictionaries[0]?.dict?.zh ?? {}).some((v) => String(v).includes('TypeSafe')))
+}
 
 console.log(failed === 0 ? '\nSMOKE_OK' : `\nSMOKE_FAILED (${failed})`)
 process.exit(failed === 0 ? 0 : 1)
