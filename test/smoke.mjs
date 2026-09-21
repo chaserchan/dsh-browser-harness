@@ -148,7 +148,11 @@ check('有 key 时提示词含 autopilot 段', textWithKey.includes('browser_aut
   // factory 的返回值就是模块（module.exports），与 global-prompt 同构
   const clientModule = clientDef.factory(fakeRequire)
 
-  check('client: __ModuleLoader__.load 注册了 id', clientDef.id === 'dsh-plugin-browser-harness', String(clientDef.id))
+  // 宿主 client bundle 的校验契约：load 的 id 必须等于插件包名，
+  // 否则报 "loaded without registering <name> via __ModuleLoader__.load"
+  const pkgName = (await import('../package.json', { with: { type: 'json' } })).default.name
+  check('client: __ModuleLoader__.load 注册了 id', typeof clientDef.id === 'string' && clientDef.id.length > 0, String(clientDef.id))
+  check('client: id 必须等于包名（宿主校验契约）', clientDef.id === pkgName, `${clientDef.id} !== ${pkgName}`)
   check('client: exports.inject 三服务', clientModule.inject.join(',') === 'slots,locale,settingsScope', clientModule.inject.join(','))
 
   const clientCtx = {
