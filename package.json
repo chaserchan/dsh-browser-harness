@@ -1,6 +1,6 @@
 {
   "name": "dsh-browser-harness",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "浏览器控制插件：把 browser-use / browser-harness 的 Browser Harness 注册为 DSH 会话工具，让 agent 直接写 Python 驱动真实 Chrome（导航/点击/输入/取无障碍树/截图），支持独立专用浏览器与附着系统浏览器两种模式；配置 TypeSafe key 后条件启用 browser_autopilot（Jev 目标式自动化）。",
   "type": "module",
   "main": "./lib/index.js",

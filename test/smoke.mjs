@@ -153,7 +153,7 @@ check('有 key 时提示词含 autopilot 段', textWithKey.includes('browser_aut
   const pkgName = (await import('../package.json', { with: { type: 'json' } })).default.name
   check('client: __ModuleLoader__.load 注册了 id', typeof clientDef.id === 'string' && clientDef.id.length > 0, String(clientDef.id))
   check('client: id 必须等于包名（宿主校验契约）', clientDef.id === pkgName, `${clientDef.id} !== ${pkgName}`)
-  check('client: exports.inject 不含 settingsScope（0.1.7 已移除该服务）', clientModule.inject.join(',') === 'slots,locale', clientModule.inject.join(','))
+  check('client: exports.inject = slots,locale,configForms（0.1.7 用 configForms 做垫片后端）', clientModule.inject.join(',') === 'slots,locale,configForms', clientModule.inject.join(','))
 
   const clientCtx = {
     effect: (fn) => fn(),
@@ -192,26 +192,61 @@ check('有 key 时提示词含 autopilot 段', textWithKey.includes('browser_aut
   })())
   check('client: 词典含 TypeSafe 字段文案', Object.values(localeDictionaries[0]?.dict?.zh ?? {}).some((v) => String(v).includes('TypeSafe')))
 
-  // 0.1.7 主路径：无条件降级（不访问任何未 inject 服务 —— cordis client ctx 是严格 proxy，
-  // 读未声明属性会抛错把插件打成 failed）。空 ctx {} 也不能炸。
+  // 0.1.7 主路径：settingsScope 兼容垫片 —— 逐条验证 bind 契约（消费方 session-cost /
+  // agent-message 的真实调用姿势），这是「pending 消失」的成败关键。
   {
-    const degradedInjections = []
-    let warned = false
-    const origWarn = console.warn
-    console.warn = () => { warned = true }
-    try {
-      clientModule.apply({
-        slots: { inject: (n, fn) => { degradedInjections.push(n); fn() }, register: () => {} },
-      })
-      // 最苛刻：完全空的 ctx（真机 proxy 上任何未声明属性访问都会炸）
-      clientModule.apply({})
-    } catch (e) {
-      check('client: 0.1.7 降级 apply 抛错', false, String(e))
-    } finally {
-      console.warn = origWarn
+    const formState = { value: { showTechnicalDetails: true }, revision: 3 }
+    const listeners = []
+    const form = {
+      subscribe: (fn) => { listeners.push(fn); return () => {} },
+      getSnapshot: () => formState,
+      set: (field, value) => { formState.value[field] = value; return Promise.resolve(true) },
     }
-    check('client: 0.1.7 降级时不注册槽位', degradedInjections.length === 0, `注册了 ${degradedInjections.length} 个`)
-    check('client: 0.1.7 降级时打了 warn 提示 env 兜底', warned)
+    let provided = null
+    const origInfo = console.info
+    console.info = () => {}
+    let threw = null
+    try { clientModule.apply({ provide: (n, impl) => { provided = { n, impl } }, configForms: { get: () => form } }) } catch (e) { threw = e }
+    console.info = origInfo
+    check('client: 0.1.7 apply 不抛错', threw === null, String(threw))
+    check('client: 垫片提供 settingsScope 服务', provided?.n === 'settingsScope' && typeof provided.impl.bind === 'function', JSON.stringify(provided?.n))
+
+    const scope = provided.impl.bind({ namespace: 'agent-message' })
+    check('client: 兼容 scope 三件套齐全', typeof scope.subscribe === 'function' && typeof scope.getSnapshot === 'function' && typeof scope.set === 'function')
+
+    const s = scope.getSnapshot()
+    check('client: getSnapshot 补 status:ready（session-cost 的硬要求）', s.status === 'ready' && s.value?.showTechnicalDetails === true, JSON.stringify(s))
+
+    let received = null
+    scope.subscribe((snap) => { received = snap })
+    listeners.forEach((fn) => fn())
+    check('client: subscribe 转发且回调收到 snapshot', received?.status === 'ready', JSON.stringify(received))
+
+    await scope.set('lowBalanceThreshold', 42)
+    check('client: set 转发到底层 form', formState.value.lowBalanceThreshold === 42, JSON.stringify(formState.value))
+  }
+
+  // 垫片边界：namespace 未注册 → 内存降级不抛；provide 冲突 → 静默让位
+  {
+    let provided = null
+    const origInfo = console.info
+    const origWarn = console.warn
+    console.info = () => {}
+    console.warn = () => {}
+    clientModule.apply({ provide: (n, impl) => { provided = { n, impl } }, configForms: { get: () => { throw new Error('not registered') } } })
+    const dScope = provided.impl.bind({ namespace: 'ghost' })
+    check('client: namespace 未注册 → 内存降级（status=unavailable）', dScope.getSnapshot().status === 'unavailable')
+    let setThrew = null
+    try { await dScope.set('x', 1); dScope.subscribe(() => {})() } catch (e) { setThrew = e }
+    check('client: 降级 scope 读写订阅均不抛错', setThrew === null, String(setThrew))
+
+    let conflictWarned = false
+    console.warn = () => { conflictWarned = true }
+    let conflictThrew = null
+    try { clientModule.apply({ provide: () => { throw new Error('service already registered') }, configForms: { get: () => null } }) } catch (e) { conflictThrew = e }
+    console.info = origInfo
+    console.warn = origWarn
+    check('client: provide 冲突 → 静默让位不抛错', conflictThrew === null && conflictWarned, `threw=${conflictThrew} warned=${conflictWarned}`)
   }
 }
 
