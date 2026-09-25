@@ -153,7 +153,7 @@ check('有 key 时提示词含 autopilot 段', textWithKey.includes('browser_aut
   const pkgName = (await import('../package.json', { with: { type: 'json' } })).default.name
   check('client: __ModuleLoader__.load 注册了 id', typeof clientDef.id === 'string' && clientDef.id.length > 0, String(clientDef.id))
   check('client: id 必须等于包名（宿主校验契约）', clientDef.id === pkgName, `${clientDef.id} !== ${pkgName}`)
-  check('client: exports.inject 三服务', clientModule.inject.join(',') === 'slots,locale,settingsScope', clientModule.inject.join(','))
+  check('client: exports.inject 不含 settingsScope（0.1.7 已移除该服务）', clientModule.inject.join(',') === 'slots,locale', clientModule.inject.join(','))
 
   const clientCtx = {
     effect: (fn) => fn(),
@@ -190,6 +190,27 @@ check('有 key 时提示词含 autopilot 段', textWithKey.includes('browser_aut
     return zh === en && zh.length > 0
   })())
   check('client: 词典含 TypeSafe 字段文案', Object.values(localeDictionaries[0]?.dict?.zh ?? {}).some((v) => String(v).includes('TypeSafe')))
+
+  // 0.1.7 降级路径：settingsScope 服务不存在 → 不抛、不注册槽位（避免 pending）
+  {
+    const degradedInjections = []
+    let warned = false
+    const origWarn = console.warn
+    console.warn = () => { warned = true }
+    try {
+      clientModule.apply({
+        effect: (fn) => fn(),
+        locale: { register: () => {}, bind: () => () => {} },
+        // 无 settingsScope —— 模拟 0.1.7
+        slots: { inject: (n, fn) => { degradedInjections.push(n); fn() }, register: () => {} },
+      })
+    } finally {
+      console.warn = origWarn
+    }
+    check('client: 0.1.7 无 settingsScope → apply 不抛', true)
+    check('client: 0.1.7 降级时不注册槽位', degradedInjections.length === 0, `注册了 ${degradedInjections.length} 个`)
+    check('client: 0.1.7 降级时打了 warn 提示 env 兜底', warned)
+  }
 }
 
 console.log(failed === 0 ? '\nSMOKE_OK' : `\nSMOKE_FAILED (${failed})`)
