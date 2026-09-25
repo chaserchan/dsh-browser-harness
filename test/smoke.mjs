@@ -176,7 +176,8 @@ check('有 key 时提示词含 autopilot 段', textWithKey.includes('browser_aut
       register: (spec, comp) => slotRegistrations.push({ spec, comp }),
     },
   }
-  clientModule.apply(clientCtx)
+  // legacy 实现（applyLegacySettingsScope）单独测：0.1.6 兼容路径 + ConfigForms 重写的参考实现
+  clientModule.applyLegacySettingsScope(clientCtx)
 
   check('client: 绑定 settings namespace browser-harness', scopeBound?.namespace === 'browser-harness', JSON.stringify(scopeBound))
   check('client: 注入 settings.general.item 槽位', slotInjections.join(',') === 'settings.general.item', slotInjections.join(','))
@@ -191,7 +192,8 @@ check('有 key 时提示词含 autopilot 段', textWithKey.includes('browser_aut
   })())
   check('client: 词典含 TypeSafe 字段文案', Object.values(localeDictionaries[0]?.dict?.zh ?? {}).some((v) => String(v).includes('TypeSafe')))
 
-  // 0.1.7 降级路径：settingsScope 服务不存在 → 不抛、不注册槽位（避免 pending）
+  // 0.1.7 主路径：无条件降级（不访问任何未 inject 服务 —— cordis client ctx 是严格 proxy，
+  // 读未声明属性会抛错把插件打成 failed）。空 ctx {} 也不能炸。
   {
     const degradedInjections = []
     let warned = false
@@ -199,15 +201,15 @@ check('有 key 时提示词含 autopilot 段', textWithKey.includes('browser_aut
     console.warn = () => { warned = true }
     try {
       clientModule.apply({
-        effect: (fn) => fn(),
-        locale: { register: () => {}, bind: () => () => {} },
-        // 无 settingsScope —— 模拟 0.1.7
         slots: { inject: (n, fn) => { degradedInjections.push(n); fn() }, register: () => {} },
       })
+      // 最苛刻：完全空的 ctx（真机 proxy 上任何未声明属性访问都会炸）
+      clientModule.apply({})
+    } catch (e) {
+      check('client: 0.1.7 降级 apply 抛错', false, String(e))
     } finally {
       console.warn = origWarn
     }
-    check('client: 0.1.7 无 settingsScope → apply 不抛', true)
     check('client: 0.1.7 降级时不注册槽位', degradedInjections.length === 0, `注册了 ${degradedInjections.length} 个`)
     check('client: 0.1.7 降级时打了 warn 提示 env 兜底', warned)
   }
